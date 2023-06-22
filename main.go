@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
-	"flag"
+	"fmt"
 	"log"
 	"os"
 	"strings"
+
+	"github.com/spf13/cobra"
 
 	kustomv1 "github.com/fluxcd/kustomize-controller/api/v1beta2"
 	sourcev1 "github.com/fluxcd/source-controller/api/v1beta2"
@@ -17,10 +19,6 @@ import (
 )
 
 var scheme *runtime.Scheme
-
-var (
-	keepTmp bool
-)
 
 func init() {
 	scheme = runtime.NewScheme()
@@ -42,13 +40,44 @@ func init() {
 }
 
 func main() {
-	flag.BoolVar(&keepTmp, "keep", false, "report working directory and don't delete it")
-	flag.Parse()
-	args := flag.Args()
-
-	if len(args) != 3 {
-		log.Fatal("Usage: gitops-diff <repo URL> <branch> <new ref>")
+	rootCmd := &cobra.Command{
+		Use: "flux-whatif",
 	}
+	global := &globalopts{}
+	global.addFlags(rootCmd)
+
+	mo := &mergeopts{
+		globalopts: global,
+	}
+	merge := &cobra.Command{
+		Use:  "merge",
+		RunE: mo.runE,
+	}
+	mo.addFlags(merge)
+
+	rootCmd.AddCommand(merge)
+	if err := rootCmd.Execute(); err != nil {
+		fmt.Fprintln(os.Stderr, err.Error())
+		os.Exit(1)
+	}
+}
+
+type globalopts struct {
+	keepTmp bool
+}
+
+func (o *globalopts) addFlags(cmd *cobra.Command) {
+	cmd.PersistentFlags().BoolVar(&o.keepTmp, "keep", false, "if set, the temporary working directory will be logged and left intact rather than deleted")
+}
+
+type mergeopts struct {
+	*globalopts
+}
+
+func (mo *mergeopts) addFlags(cmd *cobra.Command) {
+}
+
+func (mo *mergeopts) runE(cmd *cobra.Command, args []string) error {
 	repoURL := args[0]
 	targetBranch := args[1]
 	newRef := args[2]
@@ -61,7 +90,6 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-
 	log.Printf("What if git repo %q branch %q has HEAD %q", repoURL, targetBranch, newRef)
 
 	ctx := context.Background()
@@ -148,7 +176,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	if keepTmp {
+	if mo.keepTmp {
 		log.Printf("info: local copy of git repos in %s", tmpRoot)
 	} else {
 		defer os.RemoveAll(tmpRoot)
@@ -162,4 +190,6 @@ func main() {
 	//   Do the Kustomization dry-run, like `flux diff kustomization`,
 	//   putting any changes to Flux objects onto a queue to be
 	//   simulated.
+
+	return nil
 }
