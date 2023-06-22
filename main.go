@@ -172,7 +172,7 @@ func (mo *mergeopts) runE(cmd *cobra.Command, args []string) error {
 	// Simulate each of those with the content of the new branch
 
 	//   Before starting, make a working space
-	tmpRoot, err := os.MkdirTemp("", "gitops-whatif")
+	tmpRoot, err := os.MkdirTemp("", "flux-whatif-")
 	if err != nil {
 		log.Fatal(err)
 	}
