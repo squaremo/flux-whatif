@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -183,6 +184,19 @@ func (mo *mergeopts) runE(cmd *cobra.Command, args []string) error {
 	}
 
 	//   First, clone each git repo at the new ref into the working space
+
+	// TODO I should really only clone those that are used by a
+	// Kustomization; others, we can record as unused.
+	for nsn, repo := range reposOfInterest {
+		repodir := filepath.Join(tmpRoot, nsn.Namespace, nsn.Name)
+		if err := os.MkdirAll(repodir, 0770); err != nil {
+			return err
+		}
+		log.Printf("debug: attempting to clone %s at ref %s into %s", repo.Spec.URL, newRef, repodir)
+		if err = fetchGitRepository(ctx, k8sClient, repodir, repo, newRef); err != nil {
+			return err
+		}
+	}
 
 	//   Package it as each source does (this means I need to keep a
 	//   tree above)
