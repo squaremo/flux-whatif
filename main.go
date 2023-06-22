@@ -87,7 +87,7 @@ func (mo *mergeopts) runE(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		log.Fatal(err)
 	}
-	k8sClient, err := client.New(cfg, client.Options{Scheme: scheme})
+	k8sClient, err := client.NewWithWatch(cfg, client.Options{Scheme: scheme})
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -214,9 +214,25 @@ func (mo *mergeopts) runE(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	//   Do the Kustomization dry-run, like `flux diff kustomization`,
-	//   putting any changes to Flux objects onto a queue to be
-	//   simulated.
+	for _, kustom := range kustomsOfInterest {
+		//   Do the Kustomization dry-run, like `flux diff kustomization`,
+		//   putting any changes to Flux objects onto a queue to be
+		//   simulated.
+
+		name := kustom.Spec.SourceRef.Name
+		namespace := kustom.GetNamespace()
+		if ns := kustom.Spec.SourceRef.Namespace; ns != "" {
+			namespace = ns
+		}
+		// factor this out
+		artifactdir := filepath.Join(tmpRoot, "artifact", namespace, name)
+		kustomizedir := filepath.Join(artifactdir, kustom.Spec.Path) // FIXME separators
+		diff, err := dryrunKustomization(ctx, k8sClient, kustom, kustomizedir)
+		if err != nil {
+			return err
+		}
+		println(diff)
+	}
 
 	return nil
 }
