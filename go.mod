@@ -6,7 +6,9 @@ require (
 	github.com/fluxcd/kustomize-controller/api v0.35.1
 	github.com/fluxcd/pkg/git v0.12.2
 	github.com/fluxcd/pkg/git/gogit v0.12.0
+	github.com/fluxcd/pkg/sourceignore v0.3.4
 	github.com/fluxcd/source-controller/api v0.36.1
+	github.com/go-git/go-git/v5 v5.7.0
 	github.com/spf13/cobra v1.6.0
 	k8s.io/api v0.27.2
 	k8s.io/apimachinery v0.27.2
@@ -32,7 +34,6 @@ require (
 	github.com/fluxcd/pkg/version v0.2.2 // indirect
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
 	github.com/go-git/go-billy/v5 v5.4.1 // indirect
-	github.com/go-git/go-git/v5 v5.7.0 // indirect
 	github.com/go-logr/logr v1.2.4 // indirect
 	github.com/go-openapi/jsonpointer v0.19.6 // indirect
 	github.com/go-openapi/jsonreference v0.20.1 // indirect

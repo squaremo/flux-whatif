@@ -188,7 +188,11 @@ func (mo *mergeopts) runE(cmd *cobra.Command, args []string) error {
 	// TODO I should really only clone those that are used by a
 	// Kustomization; others, we can record as unused.
 	for nsn, repo := range reposOfInterest {
-		repodir := filepath.Join(tmpRoot, nsn.Namespace, nsn.Name)
+		repodir := filepath.Join(tmpRoot, "repo", nsn.Namespace, nsn.Name)
+		if _, err := os.Stat(repodir); !os.IsNotExist(err) {
+			continue
+		}
+
 		if err := os.MkdirAll(repodir, 0770); err != nil {
 			return err
 		}
@@ -196,10 +200,19 @@ func (mo *mergeopts) runE(cmd *cobra.Command, args []string) error {
 		if err = fetchGitRepository(ctx, k8sClient, repodir, repo, newRef); err != nil {
 			return err
 		}
-	}
 
-	//   Package it as each source does (this means I need to keep a
-	//   tree above)
+		//   Package it as each source does (this means I need to keep a
+		//   tree above)
+
+		artifactdir := filepath.Join(tmpRoot, "artifact", nsn.Namespace, nsn.Name)
+		if err := os.MkdirAll(artifactdir, 0770); err != nil {
+			return err
+		}
+		log.Printf("debug: constructing an artifact from %s according to %s", repodir, nsn)
+		if err = constructArtifact(repodir, artifactdir, repo); err != nil {
+			return err
+		}
+	}
 
 	//   Do the Kustomization dry-run, like `flux diff kustomization`,
 	//   putting any changes to Flux objects onto a queue to be
@@ -207,3 +220,5 @@ func (mo *mergeopts) runE(cmd *cobra.Command, args []string) error {
 
 	return nil
 }
+
+// https://github.com/fluxcd/flux2/blob/v2.0.0-rc.5/cmd/flux/diff_kustomization.go

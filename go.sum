@@ -50,6 +50,8 @@ github.com/fluxcd/pkg/git v0.12.2/go.mod h1:9TG4fEfGCF1XHLt9Xs7X2YOmkmWOiwfjH9td
 github.com/fluxcd/pkg/git/gogit v0.12.0 h1:0mCwQND0WpCVZYHLWcXJxRvKVcyWxH4JjMQFMaea8Q4=
 github.com/fluxcd/pkg/git/gogit v0.12.0/go.mod h1:Kn+GfYfZBBIaXmQj39cQvrDxT/6y8leQxXZ5/B+YYTQ=
 github.com/fluxcd/pkg/gittestserver v0.8.4 h1:rA/QUZnfH77ZZG+5xfMqjgEHJdzeeE6Nn1o8cops/bU=
+github.com/fluxcd/pkg/sourceignore v0.3.4 h1:0cfS2Pj7xp2qpaerMjYqOBr82LC+/mGHl6v6pRbi5hs=
+github.com/fluxcd/pkg/sourceignore v0.3.4/go.mod h1:ejLx+/uIrPUgqVzMTR5JiWuUnzs+zTkoEf9gS92LqaE=
 github.com/fluxcd/pkg/ssh v0.7.4 h1:8GYneCKH2dxrHQBalcDgOCC2NtqD0JO91FlWgvnzrfo=
 github.com/fluxcd/pkg/ssh v0.7.4/go.mod h1:9Syc8nVJaZEToPTU4E99j0jZ99w39oZtov+uiNX17sc=
 github.com/fluxcd/pkg/version v0.2.2 h1:ZpVXECeLA5hIQMft11iLp6gN3cKcz6UNuVTQPw/bRdI=
@@ -328,6 +330,7 @@ gopkg.in/yaml.v3 v3.0.0-20200313102051-9f266ea9e77c/go.mod h1:K4uyk7z7BCEPqu6E+C
 gopkg.in/yaml.v3 v3.0.0-20200615113413-eeeca48fe776/go.mod h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=
 gopkg.in/yaml.v3 v3.0.1 h1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA=
 gopkg.in/yaml.v3 v3.0.1/go.mod h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=
+gotest.tools v2.2.0+incompatible h1:VsBPFP1AI068pPrMxtb/S8Zkgf9xEmTLJjfM+P5UIEo=
 honnef.co/go/tools v0.0.0-20190102054323-c2f93a96b099/go.mod h1:rf3lG4BRIbNafJWhAfAdb/ePZxsR/4RtNHQocxwk9r4=
 honnef.co/go/tools v0.0.0-20190523083050-ea95bdfd59fc/go.mod h1:rf3lG4BRIbNafJWhAfAdb/ePZxsR/4RtNHQocxwk9r4=
 k8s.io/api v0.27.2 h1:+H17AJpUMvl+clT+BPnKf0E3ksMAzoBBg7CntpSuADo=
