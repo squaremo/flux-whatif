@@ -4,13 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
-	kustomv1 "github.com/fluxcd/kustomize-controller/api/v1beta2"
 	sourcev1 "github.com/fluxcd/source-controller/api/v1beta2"
 	"github.com/spf13/cobra"
-	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/config"
 )
@@ -42,10 +39,7 @@ func (mo *mergeopts) addFlags(cmd *cobra.Command) {
 	cobra.MarkFlagRequired(cmd.Flags(), "ref")
 }
 
-type sourceMap map[types.NamespacedName]*sourcev1.GitRepository
-
 func (mo *mergeopts) runE(cmd *cobra.Command, args []string) error {
-
 	cfg, err := config.GetConfig()
 	if err != nil {
 		return err
@@ -54,54 +48,6 @@ func (mo *mergeopts) runE(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-
-	ctx := context.Background()
-
-	scenario := mo.scenario
-	fmt.Fprintln(os.Stderr, scenario.Description())
-
-	reposOfInterest, err := scenario.findAffectedSources(ctx, k8sClient)
-	if err != nil {
-		return err
-	}
-
-	// Find which Kustomizations depend on those
-	var kustoms kustomv1.KustomizationList
-	if err = k8sClient.List(ctx, &kustoms, &client.ListOptions{}); err != nil {
-		return err
-	}
-
-	type kustomAndSource struct {
-		kustom *kustomv1.Kustomization
-		source *sourcev1.GitRepository
-	}
-
-	var kustomsToApply []kustomAndSource
-	for i := range kustoms.Items {
-		kustom := &kustoms.Items[i]
-		// TODO check if ready i.e., viable?
-		sourceRef := kustom.Spec.SourceRef
-		if sourceRef.Kind == "GitRepository" { // FIXME APIVersion too
-			repoName := types.NamespacedName{
-				Name:      sourceRef.Name,
-				Namespace: sourceRef.Namespace,
-			}
-			if repoName.Namespace == "" {
-				repoName.Namespace = kustom.GetNamespace()
-			}
-
-			if src, ok := reposOfInterest[repoName]; ok {
-				nsn := client.ObjectKeyFromObject(kustom)
-				log.V(INFO).Info("including Kustomization using GitRepository", "name", client.ObjectKeyFromObject(kustom), "source name", nsn)
-				kustomsToApply = append(kustomsToApply, kustomAndSource{
-					kustom: kustom,
-					source: src,
-				})
-			}
-		}
-	}
-
-	// Simulate each of those with the content of the new branch
 
 	//   Before starting, make a working space
 	tmpRoot, err := os.MkdirTemp("", "flux-whatif-")
@@ -113,28 +59,17 @@ func (mo *mergeopts) runE(cmd *cobra.Command, args []string) error {
 		defer os.RemoveAll(tmpRoot)
 	}
 
-	for _, ks := range kustomsToApply {
-		//   Do the Kustomization dry-run, like `flux diff kustomization`,
-		//   putting any changes to Flux objects onto a queue to be
-		//   simulated.
+	ctx := context.Background()
 
-		kustom := ks.kustom
-		repo := ks.source
+	scenario := mo.scenario
+	fmt.Fprintln(os.Stderr, scenario.Description())
+	return simulate(ctx, tmpRoot, scenario, k8sClient)
+}
 
-		artifactdir, err := ensureArtifactDir(ctx, tmpRoot, repo, scenario.newRef, k8sClient)
-		if err != nil {
-			return err
-		}
-
-		kustomizedir := filepath.Join(artifactdir, kustom.Spec.Path) // FIXME separators
-		diff, err := dryrunKustomization(ctx, k8sClient, kustom, kustomizedir)
-		if err != nil {
-			return err
-		}
-		println(diff)
-	}
-
-	return nil
+// construct an artifact for the source given, potentially altered according to the scenario.
+func (s mergeScenario) artifactForSource(ctx context.Context, root string, k8sClient client.Client, src *sourcev1.GitRepository) (string, error) {
+	// TODO may need to check that this repo is actually affected by the scenario?
+	return ensureArtifactDir(ctx, root, src, s.newRef, k8sClient)
 }
 
 func (s mergeScenario) findAffectedSources(ctx context.Context, k8sClient client.Client) (sourceMap, error) {
