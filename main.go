@@ -3,15 +3,15 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
 
-	"github.com/spf13/cobra"
-
 	kustomv1 "github.com/fluxcd/kustomize-controller/api/v1beta2"
 	sourcev1 "github.com/fluxcd/source-controller/api/v1beta2"
+	"github.com/go-logr/logr"
+	"github.com/go-logr/stdr"
+	"github.com/spf13/cobra"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -40,11 +40,28 @@ func init() {
 	}
 }
 
+const (
+	WARNING = 0
+	INFO    = 1
+	DEBUG   = 2
+	TRACE   = 3
+)
+
+var log logr.Logger
+
+func newLog(verbosity int) logr.Logger {
+	stdr.SetVerbosity(verbosity)
+	return stdr.New(nil)
+}
+
 func main() {
+	global := &globalopts{}
 	rootCmd := &cobra.Command{
 		Use: "flux-whatif",
+		PersistentPreRun: func(*cobra.Command, []string) {
+			log = newLog(global.verbosity)
+		},
 	}
-	global := &globalopts{}
 	global.addFlags(rootCmd)
 
 	mo := &mergeopts{
@@ -64,11 +81,13 @@ func main() {
 }
 
 type globalopts struct {
-	keepTmp bool
+	keepTmp   bool
+	verbosity int
 }
 
 func (o *globalopts) addFlags(cmd *cobra.Command) {
 	cmd.PersistentFlags().BoolVar(&o.keepTmp, "keep", false, "if set, the temporary working directory will be logged and left intact rather than deleted")
+	cmd.PersistentFlags().IntVarP(&o.verbosity, "verbosity", "v", 0, "verbosity level: -1=errors only, 0=warnings, 1=info messages, 2=debugging messages, 3=tracing messages")
 }
 
 type mergeopts struct {
@@ -85,13 +104,14 @@ func (mo *mergeopts) runE(cmd *cobra.Command, args []string) error {
 
 	cfg, err := config.GetConfig()
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	k8sClient, err := client.NewWithWatch(cfg, client.Options{Scheme: scheme})
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
-	log.Printf("What if git repo %q branch %q has HEAD %q", repoURL, targetBranch, newRef)
+	// usually the advice is: put values in a k/v pairs. Here I want to print out a simple statement; this is more UI than log message.
+	fmt.Fprintf(os.Stderr, "What if git repo %q branch %q has HEAD %q\n\n", repoURL, targetBranch, newRef)
 
 	ctx := context.Background()
 
@@ -99,7 +119,7 @@ func (mo *mergeopts) runE(cmd *cobra.Command, args []string) error {
 	// URL, and following the branch in question.
 	var gitrepos sourcev1.GitRepositoryList
 	if err = k8sClient.List(ctx, &gitrepos, &client.ListOptions{}); err != nil { // TODO namespace?
-		log.Fatal(err)
+		return err
 	}
 
 	reposOfInterest := map[types.NamespacedName]*sourcev1.GitRepository{}
@@ -107,11 +127,11 @@ func (mo *mergeopts) runE(cmd *cobra.Command, args []string) error {
 	for i := range gitrepos.Items {
 		repo := &gitrepos.Items[i]
 		if !repo.ObjectMeta.DeletionTimestamp.IsZero() {
-			log.Printf("warning: GitRepository %s is deleted; skipping", client.ObjectKeyFromObject(repo))
+			log.V(INFO).Info("warning: GitRepository is deleted; skipping", "name", client.ObjectKeyFromObject(repo))
 			continue
 		}
 		if repo.Spec.Suspend {
-			log.Printf("warning: GitRepository %s is suspended; skipping", client.ObjectKeyFromObject(repo))
+			log.V(INFO).Info("warning: GitRepository is suspended; skipping", "name", client.ObjectKeyFromObject(repo))
 			continue
 		}
 		if repo.Spec.URL == repoURL {
@@ -126,17 +146,17 @@ func (mo *mergeopts) runE(cmd *cobra.Command, args []string) error {
 					ref.SemVer != "":
 					// none of those would be affected by a branch
 					// head changing
-					log.Printf("debug: GitRepository %s does not track branch %s; skipping", client.ObjectKeyFromObject(repo), targetBranch)
+					log.V(DEBUG).Info("GitRepository does not track target branch; skipping", "name", client.ObjectKeyFromObject(repo), "branch", targetBranch)
 					continue
 				case ref.Branch != "":
 					branch = ref.Branch
 				}
 				if branch == targetBranch {
 					nsn := client.ObjectKeyFromObject(repo)
-					log.Printf("info: considering GitRepository %s", nsn)
+					log.V(INFO).Info("including GitRepository", "name", nsn)
 					reposOfInterest[nsn] = repo
 				} else {
-					log.Printf("debug: GitRepository %s does not track branch %s; skipping", client.ObjectKeyFromObject(repo), targetBranch)
+					log.V(DEBUG).Info("GitRepository does not track target branch; skipping", "name", client.ObjectKeyFromObject(repo), "branch", targetBranch)
 				}
 			}
 		}
@@ -145,7 +165,7 @@ func (mo *mergeopts) runE(cmd *cobra.Command, args []string) error {
 	// Find which Kustomizations depend on those
 	var kustoms kustomv1.KustomizationList
 	if err = k8sClient.List(ctx, &kustoms, &client.ListOptions{}); err != nil {
-		log.Fatal(err)
+		return err
 	}
 
 	type kustomAndSource struct {
@@ -169,7 +189,7 @@ func (mo *mergeopts) runE(cmd *cobra.Command, args []string) error {
 
 			if src, ok := reposOfInterest[repoName]; ok {
 				nsn := client.ObjectKeyFromObject(kustom)
-				log.Printf("info: Found Kustomization %s using GitRepository %s", client.ObjectKeyFromObject(kustom), nsn)
+				log.V(INFO).Info("including Kustomization using GitRepository", "name", client.ObjectKeyFromObject(kustom), "source name", nsn)
 				kustomsOfInterest = append(kustomsOfInterest, kustomAndSource{
 					kustom: kustom,
 					source: src,
@@ -183,11 +203,10 @@ func (mo *mergeopts) runE(cmd *cobra.Command, args []string) error {
 	//   Before starting, make a working space
 	tmpRoot, err := os.MkdirTemp("", "flux-whatif-")
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
-	if mo.keepTmp {
-		log.Printf("info: local copy of git repos in %s", tmpRoot)
-	} else {
+	log.V(INFO).Info("temporary working directory created", "path", tmpRoot, "keep", mo.keepTmp)
+	if !mo.keepTmp {
 		defer os.RemoveAll(tmpRoot)
 	}
 
@@ -232,7 +251,7 @@ func ensureArtifactDir(ctx context.Context, tmp string, repo *sourcev1.GitReposi
 	if err := os.MkdirAll(repodir, 0770); err != nil {
 		return "", err
 	}
-	log.Printf("debug: attempting to clone %s at ref %s into %s", repo.Spec.URL, newRef, repodir)
+	log.V(DEBUG).Info("attempting to clone", "url", repo.Spec.URL, "ref", newRef, "path", repodir)
 	if err = fetchGitRepository(ctx, k8sClient, repodir, repo, newRef); err != nil {
 		return "", err
 	}
@@ -243,12 +262,10 @@ func ensureArtifactDir(ctx context.Context, tmp string, repo *sourcev1.GitReposi
 	if err := os.MkdirAll(artifactdir, 0770); err != nil {
 		return "", err
 	}
-	log.Printf("debug: constructing an artifact from %s according to %s", repodir, client.ObjectKeyFromObject(repo))
+	log.V(DEBUG).Info("constructing an artifact from repo", "path", artifactdir, "source name", client.ObjectKeyFromObject(repo))
 	if err = constructArtifact(repodir, artifactdir, repo); err != nil {
 		return "", err
 	}
 
 	return artifactdir, err
 }
-
-// https://github.com/fluxcd/flux2/blob/v2.0.0-rc.5/cmd/flux/diff_kustomization.go

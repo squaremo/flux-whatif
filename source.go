@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"io"
-	"log"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -150,7 +149,7 @@ func copyWithFilter(repodir, artifactdir string, filter fileFilter) error {
 			return nil
 		}
 		if filter(path, info) {
-			log.Printf("debug: skipping %s", path)
+			log.V(DEBUG).Info("skipping path as filtered", "path", path)
 			if path != repodir && info.IsDir() {
 				return filepath.SkipDir
 			}
@@ -158,7 +157,7 @@ func copyWithFilter(repodir, artifactdir string, filter fileFilter) error {
 		}
 		// bodge the path
 		destpath := artifactdir + path[len(repodir):]
-		log.Printf("debug: including file %s -> %s", path, destpath)
+		log.V(DEBUG).Info("including file", "src", path, "dst", destpath)
 		if info.IsDir() {
 			return os.Mkdir(destpath, info.Mode())
 		}
