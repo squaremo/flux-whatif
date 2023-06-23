@@ -177,3 +177,39 @@ func copyWithFilter(repodir, artifactdir string, filter fileFilter) error {
 	})
 	return err
 }
+
+func ensureArtifactDir(ctx context.Context, tmp string, repo *sourcev1.GitRepository, newRef string, k8sClient client.Client) (artifact string, err error) {
+	repodir := filepath.Join(tmp, "repo", repo.GetNamespace(), repo.GetName())
+	artifactdir := filepath.Join(tmp, "artifact", repo.GetNamespace(), repo.GetName())
+
+	// Assume if the artifact dir has been created, all the packaging
+	// bit succeeded.
+	if _, err := os.Stat(artifactdir); err == nil {
+		return artifactdir, nil
+	} else if !os.IsNotExist(err) {
+		return "", err
+	}
+
+	// Assume if the artifact hasn't been made, neither has the repo
+	// been cloned.
+	if err := os.MkdirAll(repodir, 0770); err != nil {
+		return "", err
+	}
+	log.V(DEBUG).Info("attempting to clone", "url", repo.Spec.URL, "ref", newRef, "path", repodir)
+	if err = fetchGitRepository(ctx, k8sClient, repodir, repo, newRef); err != nil {
+		return "", err
+	}
+
+	//   Package it as each source does (this means I need to keep a
+	//   tree above)
+
+	if err := os.MkdirAll(artifactdir, 0770); err != nil {
+		return "", err
+	}
+	log.V(DEBUG).Info("constructing an artifact from repo", "path", artifactdir, "source name", client.ObjectKeyFromObject(repo))
+	if err = constructArtifact(repodir, artifactdir, repo); err != nil {
+		return "", err
+	}
+
+	return artifactdir, err
+}
