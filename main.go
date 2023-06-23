@@ -148,7 +148,12 @@ func (mo *mergeopts) runE(cmd *cobra.Command, args []string) error {
 		log.Fatal(err)
 	}
 
-	var kustomsOfInterest []*kustomv1.Kustomization
+	type kustomAndSource struct {
+		kustom *kustomv1.Kustomization
+		source *sourcev1.GitRepository
+	}
+
+	var kustomsOfInterest []kustomAndSource
 	for i := range kustoms.Items {
 		kustom := &kustoms.Items[i]
 		// TODO check if ready i.e., viable?
@@ -162,10 +167,13 @@ func (mo *mergeopts) runE(cmd *cobra.Command, args []string) error {
 				repoName.Namespace = kustom.GetNamespace()
 			}
 
-			if _, ok := reposOfInterest[repoName]; ok {
+			if src, ok := reposOfInterest[repoName]; ok {
 				nsn := client.ObjectKeyFromObject(kustom)
 				log.Printf("info: Found Kustomization %s using GitRepository %s", client.ObjectKeyFromObject(kustom), nsn)
-				kustomsOfInterest = append(kustomsOfInterest, kustom)
+				kustomsOfInterest = append(kustomsOfInterest, kustomAndSource{
+					kustom: kustom,
+					source: src,
+				})
 			}
 		}
 	}
@@ -183,49 +191,19 @@ func (mo *mergeopts) runE(cmd *cobra.Command, args []string) error {
 		defer os.RemoveAll(tmpRoot)
 	}
 
-	//   First, clone each git repo at the new ref into the working space
-
-	// TODO I should really only clone those that are used by a
-	// Kustomization; others, we can record as unused.
-	for nsn, repo := range reposOfInterest {
-		repodir := filepath.Join(tmpRoot, "repo", nsn.Namespace, nsn.Name)
-		if _, err := os.Stat(repodir); !os.IsNotExist(err) {
-			continue
-		}
-
-		if err := os.MkdirAll(repodir, 0770); err != nil {
-			return err
-		}
-		log.Printf("debug: attempting to clone %s at ref %s into %s", repo.Spec.URL, newRef, repodir)
-		if err = fetchGitRepository(ctx, k8sClient, repodir, repo, newRef); err != nil {
-			return err
-		}
-
-		//   Package it as each source does (this means I need to keep a
-		//   tree above)
-
-		artifactdir := filepath.Join(tmpRoot, "artifact", nsn.Namespace, nsn.Name)
-		if err := os.MkdirAll(artifactdir, 0770); err != nil {
-			return err
-		}
-		log.Printf("debug: constructing an artifact from %s according to %s", repodir, nsn)
-		if err = constructArtifact(repodir, artifactdir, repo); err != nil {
-			return err
-		}
-	}
-
-	for _, kustom := range kustomsOfInterest {
+	for _, ks := range kustomsOfInterest {
 		//   Do the Kustomization dry-run, like `flux diff kustomization`,
 		//   putting any changes to Flux objects onto a queue to be
 		//   simulated.
 
-		name := kustom.Spec.SourceRef.Name
-		namespace := kustom.GetNamespace()
-		if ns := kustom.Spec.SourceRef.Namespace; ns != "" {
-			namespace = ns
+		kustom := ks.kustom
+		repo := ks.source
+
+		artifactdir, err := ensureArtifactDir(ctx, tmpRoot, repo, newRef, k8sClient)
+		if err != nil {
+			return err
 		}
-		// factor this out
-		artifactdir := filepath.Join(tmpRoot, "artifact", namespace, name)
+
 		kustomizedir := filepath.Join(artifactdir, kustom.Spec.Path) // FIXME separators
 		diff, err := dryrunKustomization(ctx, k8sClient, kustom, kustomizedir)
 		if err != nil {
@@ -235,6 +213,42 @@ func (mo *mergeopts) runE(cmd *cobra.Command, args []string) error {
 	}
 
 	return nil
+}
+
+func ensureArtifactDir(ctx context.Context, tmp string, repo *sourcev1.GitRepository, newRef string, k8sClient client.Client) (artifact string, err error) {
+	repodir := filepath.Join(tmp, "repo", repo.GetNamespace(), repo.GetName())
+	artifactdir := filepath.Join(tmp, "artifact", repo.GetNamespace(), repo.GetName())
+
+	// Assume if the artifact dir has been created, all the packaging
+	// bit succeeded.
+	if _, err := os.Stat(artifactdir); err == nil {
+		return artifactdir, nil
+	} else if !os.IsNotExist(err) {
+		return "", err
+	}
+
+	// Assume if the artifact hasn't been made, neither has the repo
+	// been cloned.
+	if err := os.MkdirAll(repodir, 0770); err != nil {
+		return "", err
+	}
+	log.Printf("debug: attempting to clone %s at ref %s into %s", repo.Spec.URL, newRef, repodir)
+	if err = fetchGitRepository(ctx, k8sClient, repodir, repo, newRef); err != nil {
+		return "", err
+	}
+
+	//   Package it as each source does (this means I need to keep a
+	//   tree above)
+
+	if err := os.MkdirAll(artifactdir, 0770); err != nil {
+		return "", err
+	}
+	log.Printf("debug: constructing an artifact from %s according to %s", repodir, client.ObjectKeyFromObject(repo))
+	if err = constructArtifact(repodir, artifactdir, repo); err != nil {
+		return "", err
+	}
+
+	return artifactdir, err
 }
 
 // https://github.com/fluxcd/flux2/blob/v2.0.0-rc.5/cmd/flux/diff_kustomization.go
