@@ -122,6 +122,7 @@ func (mo *mergeopts) runE(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// keep a map, so we can look them up when finding Kustomizations that need to be applied.
 	reposOfInterest := map[types.NamespacedName]*sourcev1.GitRepository{}
 
 	for i := range gitrepos.Items {
@@ -173,7 +174,7 @@ func (mo *mergeopts) runE(cmd *cobra.Command, args []string) error {
 		source *sourcev1.GitRepository
 	}
 
-	var kustomsOfInterest []kustomAndSource
+	var kustomsToApply []kustomAndSource
 	for i := range kustoms.Items {
 		kustom := &kustoms.Items[i]
 		// TODO check if ready i.e., viable?
@@ -190,7 +191,7 @@ func (mo *mergeopts) runE(cmd *cobra.Command, args []string) error {
 			if src, ok := reposOfInterest[repoName]; ok {
 				nsn := client.ObjectKeyFromObject(kustom)
 				log.V(INFO).Info("including Kustomization using GitRepository", "name", client.ObjectKeyFromObject(kustom), "source name", nsn)
-				kustomsOfInterest = append(kustomsOfInterest, kustomAndSource{
+				kustomsToApply = append(kustomsToApply, kustomAndSource{
 					kustom: kustom,
 					source: src,
 				})
@@ -210,7 +211,7 @@ func (mo *mergeopts) runE(cmd *cobra.Command, args []string) error {
 		defer os.RemoveAll(tmpRoot)
 	}
 
-	for _, ks := range kustomsOfInterest {
+	for _, ks := range kustomsToApply {
 		//   Do the Kustomization dry-run, like `flux diff kustomization`,
 		//   putting any changes to Flux objects onto a queue to be
 		//   simulated.
