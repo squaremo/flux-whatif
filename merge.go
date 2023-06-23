@@ -97,7 +97,7 @@ func (s mergeScenario) findAffectedSources(ctx context.Context, k8sClient client
 			branch := "master" // the default in Flux GitRepository; TODO find a const for this
 			if ref := repo.Spec.Reference; ref != nil {
 				switch {
-				case strings.HasPrefix(ref.Name, "refs/heads/%s"):
+				case strings.HasPrefix(ref.Name, "refs/heads/"):
 					// Name takes precedence over Tag, Branch and SemVer
 					branch = strings.TrimPrefix(ref.Name, "refs/heads/")
 				case ref.Tag != "" ||
