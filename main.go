@@ -67,7 +67,17 @@ func main() {
 	}
 	mo.addFlags(merge)
 
+	to := &tagopts{
+		globalopts: global,
+	}
+	tag := &cobra.Command{
+		Use:  "tag",
+		RunE: to.runE,
+	}
+	to.addFlags(tag)
+
 	rootCmd.AddCommand(merge)
+	rootCmd.AddCommand(tag)
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err.Error())
 		os.Exit(1)

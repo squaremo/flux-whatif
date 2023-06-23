@@ -3,6 +3,7 @@ module github.com/squaremo/flux-whatif
 go 1.20
 
 require (
+	github.com/Masterminds/semver/v3 v3.2.1
 	github.com/fluxcd/flux2/v2 v2.0.0-rc.5
 	github.com/fluxcd/kustomize-controller/api v1.0.0-rc.4
 	github.com/fluxcd/pkg/git v0.12.2
@@ -10,6 +11,7 @@ require (
 	github.com/fluxcd/pkg/kustomize v1.3.4
 	github.com/fluxcd/pkg/sourceignore v0.3.4
 	github.com/fluxcd/pkg/ssa v0.28.1
+	github.com/fluxcd/pkg/version v0.2.2
 	github.com/fluxcd/source-controller/api v1.0.0-rc.5
 	github.com/go-git/go-git/v5 v5.7.0
 	github.com/go-logr/logr v1.2.4
@@ -44,7 +46,6 @@ require (
 	github.com/Azure/go-ansiterm v0.0.0-20210617225240-d185dfc1b5a1 // indirect
 	github.com/BurntSushi/toml v1.2.1 // indirect
 	github.com/MakeNowJust/heredoc v1.0.0 // indirect
-	github.com/Masterminds/semver/v3 v3.2.1 // indirect
 	github.com/Microsoft/go-winio v0.6.1 // indirect
 	github.com/ProtonMail/go-crypto v0.0.0-20230528122434-6f98819771a1 // indirect
 	github.com/acomagu/bufpipe v1.0.4 // indirect
@@ -63,7 +64,6 @@ require (
 	github.com/fluxcd/pkg/apis/kustomize v1.1.1 // indirect
 	github.com/fluxcd/pkg/apis/meta v1.1.1 // indirect
 	github.com/fluxcd/pkg/ssh v0.7.4 // indirect
-	github.com/fluxcd/pkg/version v0.2.2 // indirect
 	github.com/go-errors/errors v1.4.2 // indirect
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
 	github.com/go-git/go-billy/v5 v5.4.1 // indirect
