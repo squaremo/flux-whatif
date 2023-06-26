@@ -75,11 +75,12 @@ func simulate(ctx context.Context, tmp string, scenario scenario, k8sClient clie
 		}
 
 		kustomizedir := filepath.Join(artifactdir, kustom.Spec.Path) // FIXME separators
-		diff, err := dryrunKustomization(ctx, k8sClient, kustom, kustomizedir)
+		println("Differences from Kustomization", client.ObjectKeyFromObject(kustom).String())
+		diffs, err := dryrunKustomization(ctx, k8sClient, kustom, kustomizedir)
 		if err != nil {
 			return err
 		}
-		println(diff)
+		printDiffs(diffs)
 	}
 
 	return nil

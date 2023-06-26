@@ -14,6 +14,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+// This file was modified such that Diff() returns struct
+// representations of each object, rather than printing a diff as it
+// goes.
+
 package build
 
 import (
@@ -33,7 +37,6 @@ import (
 	"github.com/homeport/dyff/pkg/dyff"
 	"github.com/lucasb-eyer/go-colorful"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/errors"
 	"sigs.k8s.io/cli-utils/pkg/kstatus/polling"
 	"sigs.k8s.io/cli-utils/pkg/object"
@@ -55,22 +58,28 @@ func (b *Builder) Manager() (*ssa.ResourceManager, error) {
 	return ssa.NewResourceManager(b.client, statusPoller, owner), nil
 }
 
-func (b *Builder) Diff() (string, bool, error) {
-	output := strings.Builder{}
-	createdOrDrifted := false
+type DiffEntry struct {
+	Action string
+	Meta   object.ObjMetadata
+	Diff   string
+}
+
+func (b *Builder) Diff() ([]DiffEntry, error) {
+	var diffs []DiffEntry
+
 	objects, err := b.Build()
 	if err != nil {
-		return "", createdOrDrifted, err
+		return diffs, err
 	}
 
 	err = ssa.SetNativeKindsDefaults(objects)
 	if err != nil {
-		return "", createdOrDrifted, err
+		return diffs, err
 	}
 
 	resourceManager, err := b.Manager()
 	if err != nil {
-		return "", createdOrDrifted, err
+		return diffs, err
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), b.timeout)
@@ -79,7 +88,7 @@ func (b *Builder) Diff() (string, bool, error) {
 	if b.spinner != nil {
 		err = b.spinner.Start()
 		if err != nil {
-			return "", false, fmt.Errorf("failed to start spinner: %w", err)
+			return diffs, fmt.Errorf("failed to start spinner: %w", err)
 		}
 	}
 
@@ -105,27 +114,33 @@ func (b *Builder) Diff() (string, bool, error) {
 			diffSopsSecret(obj, liveObject, mergedObject, change)
 		}
 
+		// This is given a value here, but only added to the list of
+		// diffs if there was a changed/created action.
+		objdiff := DiffEntry{
+			Meta: change.ObjMetadata,
+		}
+
 		if change.Action == ssa.CreatedAction {
-			output.WriteString(writeString(fmt.Sprintf("► %s created\n", change.Subject), bunt.Green))
-			createdOrDrifted = true
+			objdiff.Action = "create"
+			diffs = append(diffs, objdiff)
 		}
 
 		if change.Action == ssa.ConfiguredAction {
-			output.WriteString(bunt.Sprint(fmt.Sprintf("► %s drifted\n", change.Subject)))
+			objdiff.Action = "update"
+			var output strings.Builder
 			liveFile, mergedFile, tmpDir, err := writeYamls(liveObject, mergedObject)
 			if err != nil {
-				return "", createdOrDrifted, err
+				return diffs, err
 			}
 			defer cleanupDir(tmpDir)
 
 			err = diff(liveFile, mergedFile, &output)
 			if err != nil {
-				return "", createdOrDrifted, err
+				return diffs, err
 			}
-
-			createdOrDrifted = true
+			objdiff.Diff = output.String()
+			diffs = append(diffs, objdiff)
 		}
-
 		addObjectsToInventory(newInventory, change)
 	}
 
@@ -138,10 +153,13 @@ func (b *Builder) Diff() (string, bool, error) {
 		if oldStatus.Inventory != nil {
 			diffObjects, err := diffInventory(oldStatus.Inventory, newInventory)
 			if err != nil {
-				return "", createdOrDrifted, err
+				return diffs, err
 			}
-			for _, object := range diffObjects {
-				output.WriteString(writeString(fmt.Sprintf("► %s deleted\n", ssa.FmtUnstructured(object)), bunt.OrangeRed))
+			for _, objmeta := range diffObjects {
+				diffs = append(diffs, DiffEntry{
+					Action: "delete",
+					Meta:   objmeta,
+				})
 			}
 		}
 	}
@@ -149,11 +167,11 @@ func (b *Builder) Diff() (string, bool, error) {
 	if b.spinner != nil {
 		err = b.spinner.Stop()
 		if err != nil {
-			return "", createdOrDrifted, fmt.Errorf("failed to stop spinner: %w", err)
+			return diffs, fmt.Errorf("failed to stop spinner: %w", err)
 		}
 	}
 
-	return output.String(), createdOrDrifted, errors.Reduce(errors.Flatten(errors.NewAggregate(diffErrs)))
+	return diffs, errors.Reduce(errors.Flatten(errors.NewAggregate(diffErrs)))
 }
 
 func writeYamls(liveObject, mergedObject *unstructured.Unstructured) (string, string, string, error) {
@@ -257,17 +275,8 @@ func sopsComparableByKeys(object *unstructured.Unstructured) []string {
 }
 
 // diffInventory returns the slice of objects that do not exist in the target inventory.
-func diffInventory(inv *kustomizev1.ResourceInventory, target *kustomizev1.ResourceInventory) ([]*unstructured.Unstructured, error) {
-	versionOf := func(i *kustomizev1.ResourceInventory, objMetadata object.ObjMetadata) string {
-		for _, entry := range i.Entries {
-			if entry.ID == objMetadata.String() {
-				return entry.Version
-			}
-		}
-		return ""
-	}
-
-	objects := make([]*unstructured.Unstructured, 0)
+func diffInventory(inv *kustomizev1.ResourceInventory, target *kustomizev1.ResourceInventory) ([]object.ObjMetadata, error) {
+	var objects []object.ObjMetadata
 	aList, err := listMetaInInventory(inv)
 	if err != nil {
 		return nil, err
@@ -284,18 +293,9 @@ func diffInventory(inv *kustomizev1.ResourceInventory, target *kustomizev1.Resou
 	}
 
 	for _, metadata := range list {
-		u := &unstructured.Unstructured{}
-		u.SetGroupVersionKind(schema.GroupVersionKind{
-			Group:   metadata.GroupKind.Group,
-			Kind:    metadata.GroupKind.Kind,
-			Version: versionOf(inv, metadata),
-		})
-		u.SetName(metadata.Name)
-		u.SetNamespace(metadata.Namespace)
-		objects = append(objects, u)
+		objects = append(objects, metadata)
 	}
 
-	sort.Sort(ssa.SortableUnstructureds(objects))
 	return objects, nil
 }
 

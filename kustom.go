@@ -8,7 +8,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func dryrunKustomization(ctx context.Context, k8sClient client.WithWatch, kustom *kustomizev1.Kustomization, artifactdir string) (string, error) {
+func dryrunKustomization(ctx context.Context, k8sClient client.WithWatch, kustom *kustomizev1.Kustomization, artifactdir string) ([]build.DiffEntry, error) {
 	b, err := build.NewBuilder(kustom.GetName(), artifactdir,
 		build.WithKustomization(kustom),
 		build.WithClient(k8sClient),
@@ -16,8 +16,16 @@ func dryrunKustomization(ctx context.Context, k8sClient client.WithWatch, kustom
 		build.WithNamespace(kustom.GetNamespace()),
 	)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	output, _, err := b.Diff()
-	return output, err
+	return b.Diff()
+}
+
+func printDiffs(diffs []build.DiffEntry) {
+	for _, d := range diffs {
+		println(d.Meta.String(), d.Action)
+		if d.Action == "update" {
+			println(d.Diff)
+		}
+	}
 }
