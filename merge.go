@@ -66,59 +66,35 @@ func (mo *mergeopts) runE(cmd *cobra.Command, args []string) error {
 	return simulate(ctx, tmpRoot, scenario, k8sClient)
 }
 
-// construct an artifact for the source given, potentially altered according to the scenario.
-func (s mergeScenario) artifactForSource(ctx context.Context, root string, k8sClient client.Client, src *sourcev1.GitRepository) (string, error) {
-	// TODO may need to check that this repo is actually affected by the scenario?
-	return ensureArtifactDir(ctx, root, src, s.newRef, k8sClient)
-}
-
 func (s mergeScenario) findAffectedSources(ctx context.Context, k8sClient client.Client) (sourceMap, error) {
-	// List all the git repos, and find those with the particular repo
-	// URL, and following the branch in question.
-	var gitrepos sourcev1.GitRepositoryList
-	if err := k8sClient.List(ctx, &gitrepos, &client.ListOptions{}); err != nil { // TODO namespace?
-		return nil, err
-	}
-
-	// keep a map, so we can look them up when finding Kustomizations that need to be applied.
-	reposOfInterest := sourceMap{}
-
-	for i := range gitrepos.Items {
-		repo := &gitrepos.Items[i]
-		if !repo.ObjectMeta.DeletionTimestamp.IsZero() {
-			log.V(INFO).Info("warning: GitRepository is deleted; skipping", "name", client.ObjectKeyFromObject(repo))
-			continue
-		}
-		if repo.Spec.Suspend {
-			log.V(INFO).Info("warning: GitRepository is suspended; skipping", "name", client.ObjectKeyFromObject(repo))
-			continue
-		}
-		if repo.Spec.URL == s.url {
-			branch := "master" // the default in Flux GitRepository; TODO find a const for this
-			if ref := repo.Spec.Reference; ref != nil {
-				switch {
-				case strings.HasPrefix(ref.Name, "refs/heads/"):
-					// Name takes precedence over Tag, Branch and SemVer
-					branch = strings.TrimPrefix(ref.Name, "refs/heads/")
-				case ref.Tag != "" ||
-					ref.Commit != "" ||
-					ref.SemVer != "":
-					// none of those would be affected by a branch
-					// head changing
-					log.V(DEBUG).Info("GitRepository does not track target branch; skipping", "name", client.ObjectKeyFromObject(repo), "branch", s.targetBranch)
-					continue
-				case ref.Branch != "":
-					branch = ref.Branch
+	return findRepos(ctx, k8sClient, s.url, func(repo *sourcev1.GitRepository) bool {
+		branch := "master" // the default in Flux GitRepository; TODO find a const for this
+		if ref := repo.Spec.Reference; ref != nil {
+			switch {
+			case strings.HasPrefix(ref.Name, "refs/heads/"):
+				// Name takes precedence over Tag, Branch and SemVer
+				branch = strings.TrimPrefix(ref.Name, "refs/heads/")
+			case ref.Tag != "" ||
+				ref.Commit != "" ||
+				ref.SemVer != "":
+				// none of those would be affected by a branch
+				// head changing
+				log.V(DEBUG).Info("GitRepository does not track target branch; skipping", "name", client.ObjectKeyFromObject(repo), "branch", s.targetBranch)
+				return false
+			case ref.Branch != "":
+				branch = ref.Branch
+			}
+			if branch == s.targetBranch {
+				nsn := client.ObjectKeyFromObject(repo)
+				log.V(INFO).Info("including GitRepository", "name", nsn)
+				repo.Spec.Reference = &sourcev1.GitRepositoryRef{
+					Name: s.newRef,
 				}
-				if branch == s.targetBranch {
-					nsn := client.ObjectKeyFromObject(repo)
-					log.V(INFO).Info("including GitRepository", "name", nsn)
-					reposOfInterest[nsn] = repo
-				} else {
-					log.V(DEBUG).Info("GitRepository does not track target branch; skipping", "name", client.ObjectKeyFromObject(repo), "branch", s.targetBranch)
-				}
+				return true
+			} else {
+				log.V(DEBUG).Info("GitRepository does not track target branch; skipping", "name", client.ObjectKeyFromObject(repo), "branch", s.targetBranch)
 			}
 		}
-	}
-	return reposOfInterest, nil
+		return false
+	})
 }

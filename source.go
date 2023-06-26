@@ -19,7 +19,48 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func fetchGitRepository(ctx context.Context, k8sClient client.Client, dir string, repo *sourcev1.GitRepository, newref string) error {
+// Find the Repos that use the URL given, are active, and pass
+// `filter`. At present, `filter` should mutate the object to reflect
+// the particular scenario.
+func findRepos(ctx context.Context, k8sClient client.Client, url string, filter func(*sourcev1.GitRepository) bool) (sourceMap, error) {
+	// List all the git repos, and find those with the particular repo
+	// URL, and following the branch in question. Mutate them to use
+	// the new ref, so an artifact is constructed from the commit per
+	// the scenario.
+	var gitrepos sourcev1.GitRepositoryList
+	if err := k8sClient.List(ctx, &gitrepos, &client.ListOptions{}); err != nil { // TODO namespace?
+		return nil, err
+	}
+
+	// keep a map, so we can look them up when finding Kustomizations that need to be applied.
+	reposOfInterest := sourceMap{}
+
+	for i := range gitrepos.Items {
+		repo := &gitrepos.Items[i]
+
+		if !repo.ObjectMeta.DeletionTimestamp.IsZero() {
+			log.V(INFO).Info("GitRepository is deleted; skipping", "name", client.ObjectKeyFromObject(repo))
+			continue
+		}
+
+		if repo.Spec.URL != url {
+			log.V(DEBUG).Info("GitRepository does not match URL; skipping", "name", client.ObjectKeyFromObject(repo))
+			continue
+		}
+
+		if repo.Spec.Suspend {
+			log.V(INFO).Info("GitRepository is suspended; skipping", "name", client.ObjectKeyFromObject(repo))
+			continue
+		}
+
+		if filter(repo) {
+			reposOfInterest[client.ObjectKeyFromObject(repo)] = repo
+		}
+	}
+	return reposOfInterest, nil
+}
+
+func fetchGitRepository(ctx context.Context, k8sClient client.Client, dir string, repo *sourcev1.GitRepository) error {
 	// this is the relevant bit of the source-controller (sadly, but
 	// understandably, it's internal):
 	// https://github.com/fluxcd/source-controller/blob/v1.0.0-rc.5/internal/controller/gitrepository_controller.go#L466
@@ -56,7 +97,7 @@ func fetchGitRepository(ctx context.Context, k8sClient client.Client, dir string
 	// artifacts, err := fetchIncludes(k8sClient, ctx, obj)
 	// ... up to L537
 
-	_, err = gitCheckout(ctx, repo, newref, authOpts, dir)
+	_, err = gitCheckout(ctx, repo, authOpts, dir)
 	if err != nil {
 		return err
 	}
@@ -70,7 +111,7 @@ func fetchGitRepository(ctx context.Context, k8sClient client.Client, dir string
 }
 
 func gitCheckout(ctx context.Context,
-	repo *sourcev1.GitRepository, newref string, authOpts *git.AuthOptions, dir string) (*git.Commit, error) {
+	repo *sourcev1.GitRepository, authOpts *git.AuthOptions, dir string) (*git.Commit, error) {
 	// this is from gitCheckout:
 	// https://github.com/fluxcd/source-controller/blob/main/internal/controller/gitrepository_controller.go#L779,
 	// with controller bookkeeping removed, and no logic changed.
@@ -78,8 +119,13 @@ func gitCheckout(ctx context.Context,
 		RecurseSubmodules: repo.Spec.RecurseSubmodules,
 		ShallowClone:      true,
 	}
-	// Changed: use the newref, rather than looking at the spec.
-	cloneOpts.RefName = newref
+	if ref := repo.Spec.Reference; ref != nil {
+		cloneOpts.Branch = ref.Branch
+		cloneOpts.Commit = ref.Commit
+		cloneOpts.Tag = ref.Tag
+		cloneOpts.SemVer = ref.SemVer
+		cloneOpts.RefName = ref.Name
+	}
 
 	clientOpts := []gogit.ClientOption{gogit.WithDiskStorage()}
 	if authOpts.Transport == git.HTTP {
@@ -178,7 +224,7 @@ func copyWithFilter(repodir, artifactdir string, filter fileFilter) error {
 	return err
 }
 
-func ensureArtifactDir(ctx context.Context, tmp string, repo *sourcev1.GitRepository, newRef string, k8sClient client.Client) (artifact string, err error) {
+func ensureArtifactDir(ctx context.Context, tmp string, k8sClient client.Client, repo *sourcev1.GitRepository) (artifact string, err error) {
 	repodir := filepath.Join(tmp, "repo", repo.GetNamespace(), repo.GetName())
 	artifactdir := filepath.Join(tmp, "artifact", repo.GetNamespace(), repo.GetName())
 
@@ -195,8 +241,8 @@ func ensureArtifactDir(ctx context.Context, tmp string, repo *sourcev1.GitReposi
 	if err := os.MkdirAll(repodir, 0770); err != nil {
 		return "", err
 	}
-	log.V(DEBUG).Info("attempting to clone", "url", repo.Spec.URL, "ref", newRef, "path", repodir)
-	if err = fetchGitRepository(ctx, k8sClient, repodir, repo, newRef); err != nil {
+	log.V(DEBUG).Info("attempting to clone", "url", repo.Spec.URL, "ref", repo.Spec.Reference, "path", repodir)
+	if err = fetchGitRepository(ctx, k8sClient, repodir, repo); err != nil {
 		return "", err
 	}
 

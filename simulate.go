@@ -15,7 +15,6 @@ type sourceMap map[types.NamespacedName]*sourcev1.GitRepository
 
 type scenario interface {
 	findAffectedSources(context.Context, client.Client) (sourceMap, error)
-	artifactForSource(context.Context, string, client.Client, *sourcev1.GitRepository) (string, error)
 }
 
 func simulate(ctx context.Context, tmp string, scenario scenario, k8sClient client.WithWatch) error {
@@ -85,7 +84,7 @@ func simulate(ctx context.Context, tmp string, scenario scenario, k8sClient clie
 		kustom := ks.kustom
 		repo := ks.source
 
-		artifactdir, err := scenario.artifactForSource(ctx, tmp, k8sClient, repo)
+		artifactdir, err := ensureArtifactDir(ctx, tmp, k8sClient, repo)
 		if err != nil {
 			return err
 		}
