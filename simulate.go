@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"path/filepath"
+	"sort"
 
 	kustomv1 "github.com/fluxcd/kustomize-controller/api/v1beta2"
 	sourcev1 "github.com/fluxcd/source-controller/api/v1beta2"
@@ -59,9 +60,24 @@ func simulate(ctx context.Context, tmp string, scenario scenario, k8sClient clie
 		}
 	}
 
-	// Simulate each of those with the content of the new branch
+	// sort (stably) so that the Kustomizations can be output in gorups under each source (and in the same order for each run, if nothing else changes).
+	sort.SliceStable(kustomsToApply, func(i, j int) bool {
+		srci, srcj := kustomsToApply[i].source, kustomsToApply[j].source
+		if srci.GetNamespace() == srcj.GetNamespace() {
+			return srci.GetName() < srcj.GetName()
+		}
+		return srci.GetNamespace() < srcj.GetNamespace()
+	})
 
+	var currentSource *sourcev1.GitRepository
+
+	// Simulate each of those with the content of the new branch
 	for _, ks := range kustomsToApply {
+		if ks.source != currentSource {
+			currentSource = ks.source
+			println("GitRepository", client.ObjectKeyFromObject(currentSource).String(), "changed per the scenario")
+		}
+
 		//   Do the Kustomization dry-run, like `flux diff kustomization`,
 		//   putting any changes to Flux objects onto a queue to be
 		//   simulated.
@@ -75,7 +91,7 @@ func simulate(ctx context.Context, tmp string, scenario scenario, k8sClient clie
 		}
 
 		kustomizedir := filepath.Join(artifactdir, kustom.Spec.Path) // FIXME separators
-		println("Differences from Kustomization", client.ObjectKeyFromObject(kustom).String())
+		println("  Kustomization", client.ObjectKeyFromObject(kustom).String())
 		diffs, err := dryrunKustomization(ctx, k8sClient, kustom, kustomizedir)
 		if err != nil {
 			return err
